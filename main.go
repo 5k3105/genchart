@@ -1,4 +1,4 @@
-package main
+package genchart
 
 import (
 	"bytes"
@@ -19,14 +19,16 @@ import (
 var colors1 = []string{`89da59`,`90afc5`,`375e97`,`ffbb00`,`5bc8ac`,`4cb5f5`,`6ab187`,`ec96a4`,`f0810f`,`f9a603`,`a1be95`,`e2dfa2`,`ebdf00`,`5b7065`,`eb8a3e`,`217ca3`}
 var colors2 = []string{`4D4D4D`,`5DA5DA`,`FAA43A`,`60BD68`,`F17CB0`,`B2912F`,`B276B2`,`DECF3F`,`F15854`,`004185`,`099482`,`5df058`,`20b8ce`,`b9c1c9`,`e8d174`,`e39e54`,`d64d4d`,`4d7358`,`9ed670`}
 
-const dbaddress = "http://10.100.110.16:8087"
-const djson = `C:\Users\clott\Desktop\gd.json`
+const dbaddress = "http://localhost:8087"
+const djson = `gd.json`
 
-const timefilter = `time > now() - 30s`
+var timefilter string //= `time > now() - 2590h`
 
 var c client.Client
 
-func main() {
+func Genchart(tf string) {
+    
+    timefilter = tf
     
 	title, chartnames, chartqueries, yaxisname := loaddashboards()
 	c = newdbclient()
@@ -41,14 +43,14 @@ func main() {
 			rightaxis = yaxisname.Array()[i].Array()[1].String()
 			
 			drawChart2(title.String(), leftaxis, rightaxis, chartnames.Array()[i].String(), chartqueries.Array()[i])
-			fmt.Println(title.String(), leftaxis, rightaxis, chartnames.Array()[i].String(), chartqueries.Array()[i])
+			//fmt.Println(title.String(), leftaxis, rightaxis, chartnames.Array()[i].String(), chartqueries.Array()[i])
 			
 		} else {
 			
 			leftaxis = yaxisname.Array()[i].Array()[0].String()
 			
 			drawChart1(title.String(), leftaxis, chartnames.Array()[i].String(), chartqueries.Array()[i])
-			fmt.Println(title.String(), leftaxis, chartnames.Array()[i].String(), chartqueries.Array()[i])
+			//fmt.Println(title.String(), leftaxis, chartnames.Array()[i].String(), chartqueries.Array()[i])
 		}
 
 	}
@@ -56,7 +58,6 @@ func main() {
 	c.Close()
 
 }
-
 func drawChart1(title, leftaxis, chartname string, chartqueries gjson.Result) {
 
 	vts := make([]time.Time, 0)
@@ -64,22 +65,40 @@ func drawChart1(title, leftaxis, chartname string, chartqueries gjson.Result) {
 	var cn1 []string
 
 	qs := chartqueries.Array()[0]
-	
-	q1 := qs.Array()[0].String()
-	
-		cn, src, sql := parsesql(q1)
 
-		cn1 = append(cn1, cn...)
-		
-		vts, yv1 := query(sql, cn, src)
-		
+	q1 := qs.Array()[0].String()
+
+	cn, src, sql := parsesql(q1)
+
+	cn1 = append(cn1, cn...)
+
+	vts, yv1 := query(sql, cn, src)
+
 	createChart1(title, leftaxis, chartname, cn1, vts, yv1)
 }
 
 func createChart1(title, leftaxis, chartname string, cn1 []string, vts []time.Time, yv1 [][]float64) {
 
+	var min, max float64
+	for ch := 0; ch < len(yv1); ch++ {
+
+		if ch == 0 {
+			min = yv1[ch][0]
+			max = yv1[ch][0]
+		}
+
+		for _, v := range yv1[ch] {
+			if v > max {
+				max = v
+			}
+			if v < min {
+				min = v
+			}
+		}
+	}
+
 	charts := make([]chart.Series, 0)
-		
+
 	for ch := 0; ch < len(yv1); ch++ {
 		charts = append(charts, genchart1(`(R) `+cn1[ch+1], vts, yv1[ch], ch))
 		fmt.Println("chart: ", ch)
@@ -92,52 +111,54 @@ func createChart1(title, leftaxis, chartname string, cn1 []string, vts []time.Ti
 		//Height: 1080, //720,
 		DPI: 110,
 
-Background: chart.Style{
+		Background: chart.Style{
 			Padding: chart.Box{
 				Top:  20,
 				Left: 270,
 			},
 		},
-				
+
 		XAxis: chart.XAxis{
 			Name:      "time",
 			NameStyle: chart.StyleShow(),
 			Style:     chart.StyleShow(),
-			
+
 			GridMajorStyle: chart.Style{
 				Show:        true,
 				StrokeColor: chart.ColorAlternateGray,
 				StrokeWidth: 1.0,
 			},
 
-
 			ValueFormatter: chart.TimeMinuteValueFormatter, //TimeHourValueFormatter,
 		},
-
 
 		YAxis: chart.YAxis{
 			Name:      leftaxis,
 			NameStyle: chart.StyleShow(),
 			Style:     chart.StyleShow(),
-			//ValueFormatter: chart.TimeMinuteValueFormatter, 
+
+			Range: &chart.ContinuousRange{
+				Min: min - 0.05, //0.0,
+				Max: max + 0.05, //10.0,
+			},
+
 		},
 
 		Series: charts,
-
 	}
 
 	graph.Elements = []chart.Renderable{
 		chart.LegendLeft(&graph),
 	}
-	
+
 	buffer := bytes.NewBuffer([]byte{})
-	
+
 	err := graph.Render(chart.PNG, buffer)
 	if err != nil {
-		println("error on render chart ",err)
+		println("error on render chart ", err)
 	}
-	
-	fo, err := os.Create(chartname + ".png")
+
+	fo, err := os.Create(`images/` + chartname + ".png")
 	if err != nil {
 		panic(err)
 	}
@@ -145,8 +166,8 @@ Background: chart.Style{
 	if _, err := fo.Write(buffer.Bytes()); err != nil {
 		panic(err)
 	}
-	
-}	
+
+}
 
 func drawChart2(title, leftaxis, rightaxis, chartname string, chartqueries gjson.Result) {
 
@@ -155,30 +176,66 @@ func drawChart2(title, leftaxis, rightaxis, chartname string, chartqueries gjson
 	var cn1, cn2 []string
 
 	qs := chartqueries.Array()[0]
-	
+
 	q1 := qs.Array()[0].String()
-	
-		cn, src, sql := parsesql(q1)
 
-		cn1 = append(cn1, cn...)
-		
-		vts, yv1 := query(sql, cn, src)
-		
+	cn, src, sql := parsesql(q1)
+
+	cn1 = append(cn1, cn...)
+
+	vts, yv1 := query(sql, cn, src)
+
 	q2 := qs.Array()[1].String()
-	
-		cn, src, sql = parsesql(q2)
 
-		cn2 = append(cn2, cn...)
-		
-		vts, yv2 := query(sql, cn, src)
+	cn, src, sql = parsesql(q2)
+
+	cn2 = append(cn2, cn...)
+
+	vts, yv2 := query(sql, cn, src)
 
 	createChart2(title, leftaxis, rightaxis, chartname, cn1, cn2, vts, yv1, yv2)
 }
 
 func createChart2(title, leftaxis, rightaxis, chartname string, cn1, cn2 []string, vts []time.Time, yv1, yv2 [][]float64) {
 
+	var min1, max1 float64
+	for ch := 0; ch < len(yv1); ch++ {
+
+		if ch == 0 {
+			min1 = yv1[ch][0]
+			max1 = yv1[ch][0]
+		}
+
+		for _, v := range yv1[ch] {
+			if v > max1 {
+				max1 = v
+			}
+			if v < min1 {
+				min1 = v
+			}
+		}
+	}
+
+	var min2, max2 float64
+	for ch := 0; ch < len(yv2); ch++ {
+
+		if ch == 0 {
+			min2 = yv2[ch][0]
+			max2 = yv2[ch][0]
+		}
+
+		for _, v := range yv2[ch] {
+			if v > max2 {
+				max2 = v
+			}
+			if v < min2 {
+				min2 = v
+			}
+		}
+	}
+
 	charts := make([]chart.Series, 0)
-		
+
 	for ch := 0; ch < len(yv1); ch++ {
 		charts = append(charts, genchart1(`(R) `+cn1[ch+1], vts, yv1[ch], ch))
 		fmt.Println("chart y1: ", ch)
@@ -189,66 +246,69 @@ func createChart2(title, leftaxis, rightaxis, chartname string, cn1, cn2 []strin
 		fmt.Println("chart y2: ", ch)
 	}
 
-
 	graph := chart.Chart{
 		Width:  1480,
 		Height: 720,
-		DPI: 110,
+		DPI:    110,
 
-Background: chart.Style{
+		Background: chart.Style{
 			Padding: chart.Box{
 				Top:  20,
 				Left: 270,
 			},
 		},
-				
+
 		XAxis: chart.XAxis{
 			Name:      "time",
 			NameStyle: chart.StyleShow(),
 			Style:     chart.StyleShow(),
-			
+
 			GridMajorStyle: chart.Style{
 				Show:        true,
 				StrokeColor: chart.ColorAlternateGray,
 				StrokeWidth: 1.0,
 			},
 
-
 			ValueFormatter: chart.TimeMinuteValueFormatter,
 		},
-
 
 		YAxis: chart.YAxis{
 			Name:      rightaxis,
 			NameStyle: chart.StyleShow(),
 			Style:     chart.StyleShow(),
 
+			Range: &chart.ContinuousRange{
+				Min: min1 + 0.05,
+				Max: max1 + 0.05,
+			},
 		},
 
-
 		YAxisSecondary: chart.YAxis{
-			Name:      	leftaxis,
-			NameStyle:  chart.StyleShow(),
-			Style:      chart.StyleShow(),
+			Name:      leftaxis,
+			NameStyle: chart.StyleShow(),
+			Style:     chart.StyleShow(),
 
-		},		
-		
+			Range: &chart.ContinuousRange{
+				Min: min2 + 0.05,
+				Max: max2 + 0.05,
+			},
+		},
+
 		Series: charts,
-
 	}
 
 	graph.Elements = []chart.Renderable{
 		chart.LegendLeft(&graph),
 	}
-	
+
 	buffer := bytes.NewBuffer([]byte{})
-	
+
 	err := graph.Render(chart.PNG, buffer)
 	if err != nil {
 		fmt.Println("error on render chart ", err)
 	}
-	
-	fo, err := os.Create(chartname + ".png")
+
+	fo, err := os.Create(`images/` + chartname + ".png")
 	if err != nil {
 		panic(err)
 	}
@@ -256,21 +316,21 @@ Background: chart.Style{
 	if _, err := fo.Write(buffer.Bytes()); err != nil {
 		panic(err)
 	}
-	
-}	
-	
+
+}
+
 func genchart1(column string, ts []time.Time, yv []float64, ch int) chart.TimeSeries {
 
 	gc := chart.TimeSeries{
 		Name: column,
 		Style: chart.Style{
-			Show: true,
+			Show:        true,
 			StrokeWidth: 3,
-			DotWidth: 2,
-			DotColor: drawing.ColorFromHex(colors1[ch]),
+			DotWidth:    2,
+			DotColor:    drawing.ColorFromHex(colors1[ch]),
 			StrokeColor: drawing.ColorFromHex(colors1[ch]),
-			},
-
+		},
+		
 		XValues: ts,
 		YValues: yv,
 	}
@@ -284,12 +344,12 @@ func genchart2(column string, ts []time.Time, yv []float64, ch int) chart.TimeSe
 	gc := chart.TimeSeries{
 		Name: column,
 		Style: chart.Style{
-			Show: true,
+			Show:        true,
 			StrokeWidth: 3,
-			DotWidth: 2,
-			DotColor: drawing.ColorFromHex(colors2[ch]),
+			DotWidth:    2,
+			DotColor:    drawing.ColorFromHex(colors2[ch]),
 			StrokeColor: drawing.ColorFromHex(colors2[ch]),
-			},
+		},
 
 		YAxis:   chart.YAxisSecondary,
 		XValues: ts,
@@ -308,14 +368,14 @@ func parsesql(sql string) ([]string, []string, string) {
 	if err != nil {
 		println("error: ", err)
 	}
-	
+
 	cn := stmt.(*influxql.SelectStatement).ColumnNames()
 
 	src := stmt.(*influxql.SelectStatement).Sources.Names()
-	
-	return  cn, src, sql
-	
-	}
+
+	return cn, src, sql
+
+}
 
 func query(sql string, cn, src []string) ([]time.Time, [][]float64) {
 	
@@ -342,7 +402,7 @@ func query(sql string, cn, src []string) ([]time.Time, [][]float64) {
 
 			for s := range response.Results[r].Series {
 
-				fmt.Println("series name", r, ": ", response.Results[r].Series[s].Name)
+				//fmt.Println("series name", r, ": ", response.Results[r].Series[s].Name)
 
 				vals := response.Results[r].Series[s].Values
 
@@ -387,7 +447,7 @@ func query(sql string, cn, src []string) ([]time.Time, [][]float64) {
 					
 				vvs = append(vvs, vs)
 				vs = make([]float64, 0)
-				fmt.Println("vs:", len(vals[0]), vv, vs)
+				//fmt.Println("vs:", len(vals[0]), vv, vs)
 				
 				}
 				
@@ -395,8 +455,8 @@ func query(sql string, cn, src []string) ([]time.Time, [][]float64) {
 
 		}
 
-		fmt.Println(vts)
-		fmt.Println(vvs)
+		//fmt.Println(vts)
+		//fmt.Println(vvs)
 
 	}
 	
